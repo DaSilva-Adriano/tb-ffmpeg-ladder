@@ -193,8 +193,52 @@ function Initialize-Folders {
     New-Item -ItemType Directory -Path $OutputDir -Force | Out-Null | Out-Null
 }
 
+function Get-VideoFrameRate([string]$path) {
+    if (Test-RawYuvFile $path) {
+        try { return [double]$script:YuvFps } catch { return $null }
+    }
+    if (-not (Test-Path $ffprobe)) { return $null }
+    try {
+        $raw = & $ffprobe -v error -select_streams v:0 -show_entries stream=avg_frame_rate -of default=nokey=1:noprint_wrappers=1 $path 2>$null
+        if ([string]::IsNullOrWhiteSpace($raw)) { return $null }
+        $raw = $raw.Trim()
+        if ($raw -match '^(\d+)\s*/\s*(\d+)$') {
+            $den = [double]$Matches[2]
+            if ($den -eq 0) { return $null }
+            return [double]$Matches[1] / $den
+        }
+        if ($raw -match '^\d+(\.\d+)?$') { return [double]$raw }
+        return $null
+    } catch {
+        return $null
+    }
+}
+
+function Get-FpsLadder([double]$srcFps) {
+    $list = @()
+    $rounded = [int][Math]::Round($srcFps)
+    if ($srcFps -gt 60.05) {
+        $list += [pscustomobject]@{ Fps = 60; Suffix = "-60fps" }
+    } else {
+        $list += [pscustomobject]@{ Fps = $null; Suffix = "-${rounded}fps" }
+    }
+    if ($srcFps -gt 30.05) {
+        $list += [pscustomobject]@{ Fps = 30; Suffix = "-30fps" }
+    }
+    if ($srcFps -gt 24.05) {
+        $list += [pscustomobject]@{ Fps = 24; Suffix = "-24fps" }
+    }
+    return @($list)
+}
+
+function Get-VideoFilter([int]$width, [int]$height, $fps) {
+    $vf = "scale=${width}:${height}:flags=lanczos,format=yuv420p"
+    if ($null -ne $fps) { $vf += ",fps=$fps" }
+    return $vf
+}
+
 function Invoke-EncodeLadder {
-    $suffixPattern = '[-_](4k|1080p|720p|480p|360p|2160p)$'
+    $suffixPattern = '[-_](4k|1080p|720p|480p|360p|2160p)(-\d+fps)?$'
     $files = @(Get-InputVideos | Where-Object { $_.BaseName -notmatch $suffixPattern })
 
     if ($files.Count -eq 0) {
@@ -220,35 +264,42 @@ function Invoke-EncodeLadder {
 
     foreach ($file in $files) {
         $index++
-        $name = $file.BaseName -replace '[-_](4k|uhd|2160p)$', ''
+        $name = $file.BaseName -replace '[-_](4k|uhd|2160p)(-\d+fps)?$', ''
         if ([string]::IsNullOrWhiteSpace($name)) { $name = $file.BaseName }
+
+        $rawArgs = @(Get-RawVideoInputArgs $file.FullName)
+        $srcFps = Get-VideoFrameRate $file.FullName
+        if ($null -eq $srcFps) { $srcFps = 24 }
+        $fpsLadder = @(Get-FpsLadder $srcFps)
 
         $jobs = @()
         foreach ($step in $Ladder) {
-            $outPath = Join-Path $OutputDir ("{0}-{1}.mp4" -f $name, $step.Name)
-            if ($Overwrite -or -not (Test-Path $outPath)) {
-                $jobs += [pscustomobject]@{
-                    Name   = $step.Name
-                    Width  = $step.Width
-                    Height = $step.Height
-                    Crf    = $step.Crf
-                    Path   = $outPath
+            foreach ($rate in $fpsLadder) {
+                $tag = "{0}{1}" -f $step.Name, $rate.Suffix
+                $outPath = Join-Path $OutputDir ("{0}-{1}.mp4" -f $name, $tag)
+                if ($Overwrite -or -not (Test-Path $outPath)) {
+                    $jobs += [pscustomobject]@{
+                        Name   = $tag
+                        Width  = $step.Width
+                        Height = $step.Height
+                        Crf    = $step.Crf
+                        Fps    = $rate.Fps
+                        Path   = $outPath
+                    }
                 }
             }
         }
 
         Write-Host ""
-        Write-Host "[$index/$($files.Count)] $($file.Name)" -ForegroundColor Cyan
+        Write-Host "[$index/$($files.Count)] $($file.Name)  ($([Math]::Round($srcFps, 3)) fps)" -ForegroundColor Cyan
 
         if ($jobs.Count -eq 0) {
-            $msg = "SKIP already exists: ${name}-4k/-1080p/-720p/-480p/-360p.mp4"
+            $msg = "SKIP already exists: ${name}-4k/-1080p-XXfps.mp4"
             Write-Host $msg -ForegroundColor Yellow
             $msg | Tee-Object -FilePath $logPath -Append | Out-Null
             $skip++
             continue
         }
-
-        $rawArgs = @(Get-RawVideoInputArgs $file.FullName)
         $ffArgs = @(
             $(if ($Overwrite) { "-y" } else { "-n" }),
             "-hide_banner"
@@ -259,7 +310,7 @@ function Invoke-EncodeLadder {
         if ($jobs.Count -eq 1) {
             $j = $jobs[0]
             $ffArgs += @(
-                "-vf", ("scale={0}:{1}:flags=lanczos,format=yuv420p" -f $j.Width, $j.Height),
+                "-vf", (Get-VideoFilter $j.Width $j.Height $j.Fps),
                 "-map", "0:v:0", "-map", "0:a?",
                 "-c:v", "libx265", "-pix_fmt", "yuv420p", "-profile:v", "main",
                 "-crf", $j.Crf, "-preset", "medium",
@@ -272,7 +323,7 @@ function Invoke-EncodeLadder {
             $filters = @()
             for ($i = 0; $i -lt $jobs.Count; $i++) {
                 $labels += "s$i"
-                $filters += ("[s{0}]scale={1}:{2}:flags=lanczos,format=yuv420p[v{0}]" -f $i, $jobs[$i].Width, $jobs[$i].Height)
+                $filters += ("[s{0}]{1}[v{0}]" -f $i, (Get-VideoFilter $jobs[$i].Width $jobs[$i].Height $jobs[$i].Fps))
             }
             $split = "[0:v]split={0}{1}" -f $jobs.Count, (($labels | ForEach-Object { "[$_]" }) -join "")
             $ffArgs += @("-filter_complex", ($split + ";" + ($filters -join ";")))
@@ -400,8 +451,8 @@ function Invoke-CutMaster {
 }
 
 function Get-ExtendedFileName([string]$baseName, [string]$extension) {
-    if ($baseName -match '^(.*)[-_](4k|1080p|720p|480p|360p|2160p)$') {
-        return ("{0}_extended-{1}{2}" -f $Matches[1], $Matches[2], $extension)
+    if ($baseName -match '^(.*)[-_](4k|1080p|720p|480p|360p|2160p)(-\d+fps)?$') {
+        return ("{0}_extended-{1}{2}{3}" -f $Matches[1], $Matches[2], $Matches[3], $extension)
     }
     return ("{0}_extended{1}" -f $baseName, $extension)
 }
