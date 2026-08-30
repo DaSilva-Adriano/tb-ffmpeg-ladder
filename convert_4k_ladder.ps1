@@ -2,7 +2,6 @@
 # Put ffmpeg.exe (and ffprobe.exe if available) next to this script.
 #
 # Usage: double-click convert_4k_ladder.bat
-# Ladder outputs: HEVC Main 8-bit 4:2:0 (yuv420p) in MP4 hvc1.
 
 [CmdletBinding()]
 param(
@@ -400,6 +399,13 @@ function Invoke-CutMaster {
     Write-Host "Saved in input: $outPath" -ForegroundColor Green
 }
 
+function Get-ExtendedFileName([string]$baseName, [string]$extension) {
+    if ($baseName -match '^(.*)[-_](4k|1080p|720p|480p|360p|2160p)$') {
+        return ("{0}_extended-{1}{2}" -f $Matches[1], $Matches[2], $extension)
+    }
+    return ("{0}_extended{1}" -f $baseName, $extension)
+}
+
 function Invoke-ExtendShortOutputs {
     if (-not (Test-Path $ffprobe)) {
         Write-Host "ffprobe.exe is required for this option. Put it next to ffmpeg.exe." -ForegroundColor Red
@@ -407,7 +413,7 @@ function Invoke-ExtendShortOutputs {
         return
     }
 
-    $all = @(Get-OutputVideos | Where-Object { $_.BaseName -notmatch '_5m30$' })
+    $all = @(Get-OutputVideos | Where-Object { $_.BaseName -notmatch '_extended-|_extended$|_5m30$' })
     if ($all.Count -eq 0) {
         Write-Host "No videos found in $OutputDir" -ForegroundColor Yellow
         return
@@ -465,7 +471,11 @@ function Invoke-ExtendShortOutputs {
     $fail = 0
     foreach ($item in $selected) {
         $src = $item.File
-        $outPath = Join-Path $OutputDir ("{0}_5m30{1}" -f $src.BaseName, $src.Extension)
+        $outPath = Join-Path $OutputDir (Get-ExtendedFileName $src.BaseName $src.Extension)
+        if (-not $Overwrite -and (Test-Path $outPath)) {
+            Write-Host "SKIP already exists: $(Split-Path $outPath -Leaf)" -ForegroundColor Yellow
+            continue
+        }
         $listPath = Join-Path $OutputDir ("concat_{0}.txt" -f $src.BaseName)
 
         $posix = ConvertTo-ConcatPath $src.FullName
