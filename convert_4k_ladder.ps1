@@ -451,6 +451,114 @@ function Invoke-CutMaster {
     Write-Host "Saved in input: $outPath" -ForegroundColor Green
 }
 
+function Get-ExclusionFilePath {
+    return (Join-Path $root "extend_exclusions.txt")
+}
+
+function Get-ExclusionTerms {
+    $path = Get-ExclusionFilePath
+    $found = New-Object System.Collections.Generic.List[string]
+    if (-not (Test-Path $path)) { return @() }
+    foreach ($line in [IO.File]::ReadAllLines($path)) {
+        $t = $line.Trim()
+        if ($t -eq "" -or $t.StartsWith("#")) { continue }
+        if (-not $found.Contains($t)) { $found.Add($t) }
+    }
+    return $found.ToArray()
+}
+
+function Save-ExclusionTerms([string[]]$terms) {
+    $path = Get-ExclusionFilePath
+    $lines = New-Object System.Collections.Generic.List[string]
+    [void]$lines.Add("# One substring per line. Case-insensitive.")
+    [void]$lines.Add("# Files whose name contains a term are hidden from Extend.")
+    [void]$lines.Add("# Example: -vsr")
+    [void]$lines.Add("")
+    $seen = New-Object "System.Collections.Generic.HashSet[string]" ([StringComparer]::OrdinalIgnoreCase)
+    foreach ($term in @($terms)) {
+        if ([string]::IsNullOrWhiteSpace($term)) { continue }
+        $clean = $term.Trim()
+        if ($seen.Add($clean)) { [void]$lines.Add($clean) }
+    }
+    [IO.File]::WriteAllLines($path, $lines.ToArray())
+    Write-Host "Saved exclusions: $path" -ForegroundColor Green
+}
+
+function Test-NameExcluded([string]$name, [string[]]$terms) {
+    foreach ($term in $terms) {
+        if ([string]::IsNullOrWhiteSpace($term)) { continue }
+        if ($name.IndexOf($term, [System.StringComparison]::OrdinalIgnoreCase) -ge 0) {
+            return $true
+        }
+    }
+    return $false
+}
+
+function Edit-ExclusionTerms([string[]]$terms) {
+    $list = New-Object System.Collections.Generic.List[string]
+    foreach ($t in @($terms)) {
+        if (-not [string]::IsNullOrWhiteSpace($t)) { [void]$list.Add($t.Trim()) }
+    }
+    Write-Host ""
+    if ($list.Count -eq 0) {
+        Write-Host "No exclusion file yet. None applied."
+    } else {
+        Write-Host "Current exclusions:" -ForegroundColor Cyan
+        foreach ($t in $list) { Write-Host "  $t" }
+    }
+    Write-Host "Add a name substring to hide (e.g. -vsr). Empty line = done."
+    while ($true) {
+        $add = (Read-Host "Exclusion").Trim()
+        if ($add -eq "") { break }
+        $exists = $false
+        foreach ($t in $list) {
+            if ($t.Equals($add, [System.StringComparison]::OrdinalIgnoreCase)) { $exists = $true }
+        }
+        if ($exists) {
+            Write-Host "Already listed: $add" -ForegroundColor Yellow
+            continue
+        }
+        [void]$list.Add($add)
+        Write-Host "Added: $add"
+    }
+    if ($list.Count -gt 0) {
+        Save-ExclusionTerms $list.ToArray()
+    }
+    return $list.ToArray()
+}
+
+function ConvertTo-SelectedIndexes([string]$choice, [int]$count) {
+    if ($choice -match '^[Aa]$') {
+        if ($count -le 0) { return @() }
+        return @(0..($count - 1))
+    }
+    $found = New-Object System.Collections.Generic.List[int]
+    foreach ($part in @($choice -split '[,; ]+' | Where-Object { $_ -ne "" })) {
+        if ($part -match '^(\d+)-(\d+)$') {
+            $a = [int]$Matches[1]
+            $b = [int]$Matches[2]
+            if ($a -gt $b) { $tmp = $a; $a = $b; $b = $tmp }
+            for ($n = $a; $n -le $b; $n++) {
+                if ($n -lt 1 -or $n -gt $count) {
+                    Write-Host "Out of range: $n" -ForegroundColor Yellow
+                    continue
+                }
+                $found.Add($n - 1)
+            }
+        } elseif ($part -match '^\d+$') {
+            $n = [int]$part
+            if ($n -lt 1 -or $n -gt $count) {
+                Write-Host "Out of range: $n" -ForegroundColor Yellow
+                continue
+            }
+            $found.Add($n - 1)
+        } else {
+            Write-Host "Ignored: $part" -ForegroundColor Yellow
+        }
+    }
+    return @($found | Select-Object -Unique | Sort-Object)
+}
+
 function Get-ExtendedFileName([string]$baseName, [string]$extension) {
     if ($baseName -match '^(.*)[-_](4k|1080p|720p|480p|360p|2160p)(-\d+fps)?$') {
         return ("{0}_extended-{1}{2}{3}" -f $Matches[1], $Matches[2], $Matches[3], $extension)
@@ -472,8 +580,35 @@ function Invoke-ExtendShortOutputs {
     }
 
     Write-Host "Extend files shorter than $TargetExtendStamp. Original is kept."
-    $picked = @(Select-InputVideos -Files $all -AllowAll -Heading "Files in output:")
-    if ($picked.Count -eq 0) { return }
+    $terms = @(Edit-ExclusionTerms (Get-ExclusionTerms))
+    $visible = @($all | Where-Object { -not (Test-NameExcluded $_.Name $terms) })
+    if ($visible.Count -eq 0) {
+        Write-Host "No files left after exclusions." -ForegroundColor Yellow
+        return
+    }
+
+    Write-Host ""
+    Write-Host "Files in output:" -ForegroundColor Cyan
+    for ($i = 0; $i -lt $visible.Count; $i++) {
+        $dur = Get-DurationString $visible[$i].FullName
+        if ($dur) {
+            Write-Host ("  [{0}] {1}  ({2})" -f ($i + 1), $visible[$i].Name, $dur)
+        } else {
+            Write-Host ("  [{0}] {1}" -f ($i + 1), $visible[$i].Name)
+        }
+    }
+    Write-Host "  [A] All of the above"
+    $choice = (Read-Host "File(s): 5  or  20-28  or  1,4,20-22  or  A").Trim()
+    if ($choice -eq "") {
+        Write-Host "Cancelled." -ForegroundColor Yellow
+        return
+    }
+    $indexes = @(ConvertTo-SelectedIndexes $choice $visible.Count)
+    if ($indexes.Count -eq 0) {
+        Write-Host "No valid file numbers." -ForegroundColor Yellow
+        return
+    }
+    $picked = @($indexes | ForEach-Object { $visible[$_] })
 
     $selected = @()
     foreach ($f in $picked) {
