@@ -145,13 +145,14 @@ function ConvertTo-ConcatPath([string]$path) {
 function Select-InputVideos {
     param(
         [object[]]$Files,
-        [switch]$AllowAll
+        [switch]$AllowAll,
+        [string]$Heading = "Files in input:"
     )
 
     if ($Files.Count -eq 0) { return @() }
 
     Write-Host ""
-    Write-Host "Files in input:" -ForegroundColor Cyan
+    Write-Host $Heading -ForegroundColor Cyan
     for ($i = 0; $i -lt $Files.Count; $i++) {
         $dur = Get-DurationString $Files[$i].FullName
         if ($dur) {
@@ -470,51 +471,31 @@ function Invoke-ExtendShortOutputs {
         return
     }
 
-    $short = @()
-    foreach ($f in $all) {
-        $sec = Get-DurationSeconds $f.FullName
-        if ($null -eq $sec) { continue }
-        if ($sec + 0.05 -lt $TargetExtendSeconds) {
-            $short += [pscustomobject]@{
-                File = $f
-                Seconds = $sec
-                Display = Get-DurationString $f.FullName
-                Loops = [Math]::Max(2, [int][Math]::Ceiling($TargetExtendSeconds / $sec))
-            }
-        }
-    }
-
-    if ($short.Count -eq 0) {
-        Write-Host "Every output is already >= $TargetExtendStamp." -ForegroundColor Green
-        return
-    }
-
-    Write-Host ""
-    Write-Host "Outputs shorter than $TargetExtendStamp :" -ForegroundColor Cyan
-    for ($i = 0; $i -lt $short.Count; $i++) {
-        $item = $short[$i]
-        Write-Host ("  [{0}] {1}  ({2} -> {3}x copy-concat)" -f ($i + 1), $item.File.Name, $item.Display, $item.Loops)
-    }
-    Write-Host "  [A] All of the above"
-
-    $choice = (Read-Host "File number, A for all, Enter to cancel").Trim()
-    if ($choice -eq "") {
-        Write-Host "Cancelled." -ForegroundColor Yellow
-        return
-    }
+    Write-Host "Extend files shorter than $TargetExtendStamp. Original is kept."
+    $picked = @(Select-InputVideos -Files $all -AllowAll -Heading "Files in output:")
+    if ($picked.Count -eq 0) { return }
 
     $selected = @()
-    if ($choice -match '^[Aa]$') {
-        $selected = $short
-    } elseif ($choice -match '^\d+$') {
-        $idx = [int]$choice - 1
-        if ($idx -lt 0 -or $idx -ge $short.Count) {
-            Write-Host "Invalid number." -ForegroundColor Red
-            return
+    foreach ($f in $picked) {
+        $sec = Get-DurationSeconds $f.FullName
+        if ($null -eq $sec -or $sec -le 0) {
+            Write-Host "SKIP $($f.Name) (duration unknown)" -ForegroundColor Yellow
+            continue
         }
-        $selected = @($short[$idx])
-    } else {
-        Write-Host "Cancelled." -ForegroundColor Yellow
+        if ($sec + 0.05 -ge $TargetExtendSeconds) {
+            Write-Host "SKIP $($f.Name) (already $(Get-DurationString $f.FullName))" -ForegroundColor Yellow
+            continue
+        }
+        $selected += [pscustomobject]@{
+            File = $f
+            Seconds = $sec
+            Display = Get-DurationString $f.FullName
+            Loops = [Math]::Max(2, [int][Math]::Ceiling($TargetExtendSeconds / $sec))
+        }
+    }
+
+    if ($selected.Count -eq 0) {
+        Write-Host "Nothing to extend." -ForegroundColor Yellow
         return
     }
 
