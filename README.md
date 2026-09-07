@@ -2,7 +2,14 @@
 
 Private helper scripts for the Travail de Bachelor video ladder.
 
-Put `convert_4k_ladder.bat`, `convert_4k_ladder.ps1`, `ffmpeg.exe` and `ffprobe.exe` in the same folder. Double-click the `.bat`.
+Keep these next to `ffmpeg.exe` and `ffprobe.exe`, then double-click `convert_4k_ladder.bat`:
+
+- `convert_4k_ladder.bat`
+- `convert_4k_ladder.ps1`
+- `convert_4k_ladder.helpers.ps1`
+- `convert_4k_ladder.encode.ps1`
+- `convert_4k_ladder.extend.ps1`
+- `convert_4k_ladder.cutout.ps1`
 
 1. Encode ladder: 4K / 1080p / 720p / 480p / 360p to `output\\Nom-1080p.mp4` (libx265, Lanczos, audio copy). For sources above 30 fps the script asks whether to also generate a 30 fps ladder (default no; pass `-Include30Fps` to skip the question).
 2. Cut master: lossless copy of a file from `input\\` back into `input\\`
