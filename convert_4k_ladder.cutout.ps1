@@ -9,9 +9,12 @@ function Invoke-CutOutputs {
     Write-Host "The _cut_start_end mark is inserted before the resolution tag."
     Write-Host "Example: Nom-1080p-24fps.mp4 -> Nom_cut_00_01_15_00_03_00-1080p-24fps.mp4"
     $terms = @(Edit-ExclusionTerms -FileName "cut_exclusions.txt" -Terms (Get-ExclusionTerms "cut_exclusions.txt") -Purpose "Cut output")
-    $visible = @($all | Where-Object { -not (Test-NameExcluded $_.Name $terms) })
+    $mustHave = @(Read-MustHaveTerms)
+    $visible = @($all | Where-Object {
+        -not (Test-NameExcluded $_.Name $terms) -and (Test-NameHasAllTerms $_.Name $mustHave)
+    })
     if ($visible.Count -eq 0) {
-        Write-Host "No files left after exclusions." -ForegroundColor Yellow
+        Write-Host "No files left after exclusions / must-have terms." -ForegroundColor Yellow
         return
     }
 
