@@ -46,6 +46,48 @@ function Test-NameExcluded([string]$name, [string[]]$terms) {
     return $false
 }
 
+function Test-NameHasAllTerms([string]$name, [string[]]$terms) {
+    if ($null -eq $terms -or @($terms).Count -eq 0) { return $true }
+    foreach ($term in $terms) {
+        if ([string]::IsNullOrWhiteSpace($term)) { continue }
+        if ($name.IndexOf($term, [System.StringComparison]::OrdinalIgnoreCase) -lt 0) {
+            return $false
+        }
+    }
+    return $true
+}
+
+function Read-MustHaveTerms {
+    Write-Host ""
+    Write-Host "Must-have name terms (this run only, not saved to a file)." -ForegroundColor Cyan
+    Write-Host "A file is listed only if its name contains every term."
+    Write-Host "Type one term per line, or several separated by commas. Empty line = done."
+    Write-Host "Examples: ClipA    or    -1080p, -24fps"
+    $list = New-Object System.Collections.Generic.List[string]
+    while ($true) {
+        $add = (Read-Host "Must-have").Trim()
+        if ($add -eq "") { break }
+        foreach ($part in @($add -split '[,;]+' | ForEach-Object { $_.Trim() } | Where-Object { $_ -ne "" })) {
+            $exists = $false
+            foreach ($t in $list) {
+                if ($t.Equals($part, [System.StringComparison]::OrdinalIgnoreCase)) { $exists = $true }
+            }
+            if ($exists) {
+                Write-Host "Already listed: $part" -ForegroundColor Yellow
+                continue
+            }
+            [void]$list.Add($part)
+            Write-Host "Need: $part"
+        }
+    }
+    if ($list.Count -eq 0) {
+        Write-Host "No must-have filter. All remaining files will be listed." -ForegroundColor Yellow
+    } else {
+        Write-Host ("Must-have: {0}" -f ($list -join ", ")) -ForegroundColor Cyan
+    }
+    return $list.ToArray()
+}
+
 function Edit-ExclusionTerms {
     param(
         [string]$FileName,
@@ -148,9 +190,12 @@ function Invoke-ExtendShortOutputs {
 
     Write-Host "Extend files shorter than $TargetExtendStamp. Original is kept."
     $terms = @(Edit-ExclusionTerms -FileName "extend_exclusions.txt" -Terms (Get-ExclusionTerms "extend_exclusions.txt") -Purpose "Extend")
-    $visible = @($all | Where-Object { -not (Test-NameExcluded $_.Name $terms) })
+    $mustHave = @(Read-MustHaveTerms)
+    $visible = @($all | Where-Object {
+        -not (Test-NameExcluded $_.Name $terms) -and (Test-NameHasAllTerms $_.Name $mustHave)
+    })
     if ($visible.Count -eq 0) {
-        Write-Host "No files left after exclusions." -ForegroundColor Yellow
+        Write-Host "No files left after exclusions / must-have terms." -ForegroundColor Yellow
         return
     }
 
