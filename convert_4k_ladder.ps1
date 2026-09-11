@@ -42,7 +42,8 @@ foreach ($part in @(
     "convert_4k_ladder.helpers.ps1",
     "convert_4k_ladder.encode.ps1",
     "convert_4k_ladder.extend.ps1",
-    "convert_4k_ladder.cutout.ps1"
+    "convert_4k_ladder.cutout.ps1",
+    "convert_4k_ladder.crf18.ps1"
 )) {
     $p = Join-Path $here $part
     if (-not (Test-Path $p)) {
