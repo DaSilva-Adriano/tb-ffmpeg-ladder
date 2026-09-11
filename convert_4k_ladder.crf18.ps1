@@ -68,16 +68,16 @@ function Invoke-Crf18LanczosControl {
                     "-i", $file.FullName,
                     "-filter_complex", ("[0:v]{0}[lr];[lr]split=2[enc][to4k];[to4k]scale=3840:2160:flags=lanczos,format=yuv420p[up]" -f $vfDown),
                     "-map", "[enc]", "-map", "0:a?",
-                    "-c:v:0", "libx265", "-pix_fmt:v:0", "yuv420p", "-profile:v:0", "main",
-                    "-crf:v:0", "18", "-preset:v:0", "medium",
-                    "-tag:v:0", "hvc1",
+                    "-c:v", "libx265", "-pix_fmt", "yuv420p", "-profile:v", "main",
+                    "-crf", "18", "-preset", "medium",
+                    "-tag:v", "hvc1", "-movflags", "+faststart",
                     "-c:a", "copy",
                     $lrPath,
                     "-map", "[up]", "-map", "0:a?",
-                    "-c:v:1", "libx265", "-pix_fmt:v:1", "yuv420p", "-profile:v:1", "main",
-                    "-crf:v:1", "12", "-preset:v:1", "medium",
-                    "-tag:v:1", "hvc1",
-                    "-movflags", "+faststart",
+                    "-c:v", "libx265", "-pix_fmt", "yuv420p", "-profile:v", "main",
+                    "-crf", "12", "-preset", "medium",
+                    "-tag:v", "hvc1", "-movflags", "+faststart",
+                    "-c:a", "copy",
                     $upPath
                 )
 
