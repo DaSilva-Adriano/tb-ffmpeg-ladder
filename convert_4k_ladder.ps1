@@ -84,7 +84,8 @@ while ($true) {
     Write-Host " 2) Cut master      (lossless, start / end, input/)"
     Write-Host " 3) Cut output      (lossless, multi-select, output/)"
     Write-Host " 4) Extend output   (copy-concat loop to 5:30)"
-    Write-Host " 5) Quit"
+    Write-Host " 5) Upscale 720p    (bicubic to 4K, CRF 12)"
+    Write-Host " 6) Quit"
     Write-Host "==============================" -ForegroundColor Cyan
     $sel = (Read-Host "Choice").Trim()
 
@@ -93,13 +94,14 @@ while ($true) {
         "2" { Invoke-CutMaster }
         "3" { Invoke-CutOutputs }
         "4" { Invoke-ExtendShortOutputs }
-        "5" { break }
+        "5" { Invoke-Upscale720pBicubic4k }
+        "6" { break }
         "q" { break }
         "Q" { break }
-        default { Write-Host "Choose 1, 2, 3, 4 or 5." -ForegroundColor Yellow }
+        default { Write-Host "Choose 1, 2, 3, 4, 5 or 6." -ForegroundColor Yellow }
     }
 
-    if ($sel -eq "5" -or $sel -eq "q" -or $sel -eq "Q") { break }
+    if ($sel -eq "6" -or $sel -eq "q" -or $sel -eq "Q") { break }
 }
 
 exit 0
