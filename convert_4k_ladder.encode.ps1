@@ -214,24 +214,19 @@ function Invoke-CutMaster {
     Write-Host "Saved in input: $outPath" -ForegroundColor Green
 }
 
-function Get-Bicubic4kOutputName([string]$baseName) {
-    $stem = $baseName -replace '[-_]720p(-\d+fps)?$', ''
+function Get-Bicubic4kOutputName([string]$baseName, $fpsTag) {
+    $stem = $baseName -replace '[-_](4k|1080p|720p|480p|360p|2160p)(-\d+fps)?$', ''
+    $stem = $stem -replace '[-_]bicubic-4k(-\d+fps)?$', ''
     if ([string]::IsNullOrWhiteSpace($stem)) { $stem = $baseName }
-    $fpsTag = "24"
-    if ($baseName -match '(\d+)fps$') {
-        $fpsTag = $Matches[1]
-    }
+    if ([string]::IsNullOrWhiteSpace("$fpsTag")) { $fpsTag = "24" }
     return ("{0}-bicubic-4k-{1}fps.mp4" -f $stem, $fpsTag)
 }
 
 function Invoke-Upscale720pBicubic4k {
-    $pattern = '[-_]720p(-\d+fps)?$'
     $fromOutput = @(Get-OutputVideos | Where-Object {
-        $_.BaseName -match $pattern -and $_.BaseName -notmatch 'bicubic-4k'
+        $_.BaseName -notmatch '[-_]bicubic-4k(-\d+fps)?$'
     })
-    $fromInput = @(Get-InputVideos | Where-Object {
-        $_.BaseName -match $pattern -and $_.BaseName -notmatch 'bicubic-4k'
-    })
+    $fromInput = @(Get-InputVideos)
 
     $files = @()
     $seen = New-Object "System.Collections.Generic.HashSet[string]" ([StringComparer]::OrdinalIgnoreCase)
@@ -240,17 +235,18 @@ function Invoke-Upscale720pBicubic4k {
     }
 
     if ($files.Count -eq 0) {
-        Write-Host "No 720p videos found (name must end with -720p or -720p-XXfps)." -ForegroundColor Yellow
+        Write-Host "No videos found." -ForegroundColor Yellow
         Write-Host "Looked in: $OutputDir" -ForegroundColor Yellow
         Write-Host "       and: $InputDir" -ForegroundColor Yellow
         return
     }
 
-    Write-Host "Bicubic upscale 720p -> 4K (3840x2160), libx265 CRF 12, audio copy."
-    Write-Host "Source frame rate is kept. Output: Nom-bicubic-4k-XXfps.mp4"
+    Write-Host "Bicubic upscale to 4K (3840x2160), libx265 CRF 12, audio copy."
+    Write-Host "Any file name is accepted. Source frame rate is kept."
+    Write-Host "Output: Nom-bicubic-4k-XXfps.mp4"
 
     Write-Host ""
-    Write-Host "720p sources:" -ForegroundColor Cyan
+    Write-Host "Sources:" -ForegroundColor Cyan
     for ($i = 0; $i -lt $files.Count; $i++) {
         $dur = Get-DurationString $files[$i].FullName
         $where = if ($files[$i].DirectoryName -eq $OutputDir) { "output" } else { "input" }
@@ -279,14 +275,15 @@ function Invoke-Upscale720pBicubic4k {
     $index = 0
     foreach ($src in $picked) {
         $index++
-        $outName = Get-Bicubic4kOutputName $src.BaseName
-        if ($src.BaseName -notmatch '(\d+)fps$') {
+        $fpsTag = $null
+        if ($src.BaseName -match '(\d+)fps$') {
+            $fpsTag = $Matches[1]
+        } else {
             $srcFps = Get-VideoFrameRate $src.FullName
             if ($null -eq $srcFps) { $srcFps = 24 }
-            $stem = $src.BaseName -replace '[-_]720p(-\d+fps)?$', ''
-            if ([string]::IsNullOrWhiteSpace($stem)) { $stem = $src.BaseName }
-            $outName = "{0}-bicubic-4k-{1}fps.mp4" -f $stem, [int][Math]::Round($srcFps)
+            $fpsTag = [int][Math]::Round($srcFps)
         }
+        $outName = Get-Bicubic4kOutputName $src.BaseName $fpsTag
         $outPath = Join-Path $OutputDir $outName
 
         if (-not $Overwrite -and (Test-Path $outPath)) {
