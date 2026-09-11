@@ -15,4 +15,4 @@ Keep these next to `ffmpeg.exe` and `ffprobe.exe`, then double-click `convert_4k
 2. Cut master: lossless copy of a file from `input\\` back into `input\\`
 3. Cut output: lossless copy of one or more files from `output\\`. Before the file list: persisted exclusions (`cut_exclusions.txt`) then session must-have terms (typed, not saved). A file is listed only if its name contains every must-have term. Then multi-select (`5`, `20-28`, `1,4,20-22`, `A`). The cut mark is inserted before the resolution tag: `Nom-1080p-24fps.mp4` → `Nom_cut_00_01_15_00_03_00-1080p-24fps.mp4`
 4. Extend output: copy-concat loop to 5:30. Same listing flow with `extend_exclusions.txt` and session must-have terms. Mark before resolution: `Nom_extended-1080p-24fps.mp4`
-5. Upscale 720p → 4K: bicubic scale to 3840x2160, libx265 CRF 12, audio copy. Lists `*-720p*.mp4` from `output\\` then `input\\`. Writes `Nom-bicubic-4k-24fps.mp4`
+5. Upscale to 4K: bicubic scale to 3840x2160, libx265 CRF 12, audio copy. Lists any video from `output\\` then `input\\` (name does not matter). Writes `Nom-bicubic-4k-24fps.mp4`
