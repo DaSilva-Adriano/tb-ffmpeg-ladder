@@ -213,3 +213,116 @@ function Invoke-CutMaster {
 
     Write-Host "Saved in input: $outPath" -ForegroundColor Green
 }
+
+function Get-Bicubic4kOutputName([string]$baseName) {
+    $stem = $baseName -replace '[-_]720p(-\d+fps)?$', ''
+    if ([string]::IsNullOrWhiteSpace($stem)) { $stem = $baseName }
+    $fpsTag = "24"
+    if ($baseName -match '(\d+)fps$') {
+        $fpsTag = $Matches[1]
+    }
+    return ("{0}-bicubic-4k-{1}fps.mp4" -f $stem, $fpsTag)
+}
+
+function Invoke-Upscale720pBicubic4k {
+    $pattern = '[-_]720p(-\d+fps)?$'
+    $fromOutput = @(Get-OutputVideos | Where-Object {
+        $_.BaseName -match $pattern -and $_.BaseName -notmatch 'bicubic-4k'
+    })
+    $fromInput = @(Get-InputVideos | Where-Object {
+        $_.BaseName -match $pattern -and $_.BaseName -notmatch 'bicubic-4k'
+    })
+
+    $files = @()
+    $seen = New-Object "System.Collections.Generic.HashSet[string]" ([StringComparer]::OrdinalIgnoreCase)
+    foreach ($f in @($fromOutput + $fromInput)) {
+        if ($seen.Add($f.FullName)) { $files += $f }
+    }
+
+    if ($files.Count -eq 0) {
+        Write-Host "No 720p videos found (name must end with -720p or -720p-XXfps)." -ForegroundColor Yellow
+        Write-Host "Looked in: $OutputDir" -ForegroundColor Yellow
+        Write-Host "       and: $InputDir" -ForegroundColor Yellow
+        return
+    }
+
+    Write-Host "Bicubic upscale 720p -> 4K (3840x2160), libx265 CRF 12, audio copy."
+    Write-Host "Source frame rate is kept. Output: Nom-bicubic-4k-XXfps.mp4"
+
+    Write-Host ""
+    Write-Host "720p sources:" -ForegroundColor Cyan
+    for ($i = 0; $i -lt $files.Count; $i++) {
+        $dur = Get-DurationString $files[$i].FullName
+        $where = if ($files[$i].DirectoryName -eq $OutputDir) { "output" } else { "input" }
+        if ($dur) {
+            Write-Host ("  [{0}] {1}  ({2}, {3})" -f ($i + 1), $files[$i].Name, $dur, $where)
+        } else {
+            Write-Host ("  [{0}] {1}  ({2})" -f ($i + 1), $files[$i].Name, $where)
+        }
+    }
+    Write-Host "  [A] All of the above"
+    $choice = (Read-Host "File(s): 5  or  20-28  or  1,4,20-22  or  A").Trim()
+    if ($choice -eq "") {
+        Write-Host "Cancelled." -ForegroundColor Yellow
+        return
+    }
+    $indexes = @(ConvertTo-SelectedIndexes $choice $files.Count)
+    if ($indexes.Count -eq 0) {
+        Write-Host "No valid file numbers." -ForegroundColor Yellow
+        return
+    }
+    $picked = @($indexes | ForEach-Object { $files[$_] })
+
+    $ok = 0
+    $skip = 0
+    $fail = 0
+    $index = 0
+    foreach ($src in $picked) {
+        $index++
+        $outName = Get-Bicubic4kOutputName $src.BaseName
+        if ($src.BaseName -notmatch '(\d+)fps$') {
+            $srcFps = Get-VideoFrameRate $src.FullName
+            if ($null -eq $srcFps) { $srcFps = 24 }
+            $stem = $src.BaseName -replace '[-_]720p(-\d+fps)?$', ''
+            if ([string]::IsNullOrWhiteSpace($stem)) { $stem = $src.BaseName }
+            $outName = "{0}-bicubic-4k-{1}fps.mp4" -f $stem, [int][Math]::Round($srcFps)
+        }
+        $outPath = Join-Path $OutputDir $outName
+
+        if (-not $Overwrite -and (Test-Path $outPath)) {
+            Write-Host "SKIP already exists: $outName" -ForegroundColor Yellow
+            $skip++
+            continue
+        }
+
+        Write-Host ""
+        Write-Host "[$index/$($picked.Count)] UPSCALE $($src.Name) -> $outName" -ForegroundColor Cyan
+
+        $rawArgs = @(Get-RawVideoInputArgs $src.FullName)
+        $ffArgs = @(
+            $(if ($Overwrite) { "-y" } else { "-n" }),
+            "-hide_banner"
+        ) + $rawArgs + @(
+            "-i", $src.FullName,
+            "-vf", "scale=3840:2160:flags=bicubic,format=yuv420p",
+            "-map", "0:v:0", "-map", "0:a?",
+            "-c:v", "libx265", "-pix_fmt", "yuv420p", "-profile:v", "main",
+            "-crf", "12", "-preset", "medium",
+            "-tag:v", "hvc1", "-movflags", "+faststart",
+            "-c:a", "copy",
+            $outPath
+        )
+
+        & $ffmpeg @ffArgs
+        if ($LASTEXITCODE -eq 0 -and (Test-Path $outPath)) {
+            Write-Host "OK $outPath" -ForegroundColor Green
+            $ok++
+        } else {
+            Write-Host "FAIL $($src.Name) (ffmpeg exit $LASTEXITCODE)" -ForegroundColor Red
+            $fail++
+        }
+    }
+
+    Write-Host ""
+    Write-Host "Upscale done. ok=$ok skip=$skip fail=$fail" -ForegroundColor Cyan
+}
