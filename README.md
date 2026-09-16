@@ -1,7 +1,5 @@
 # tb-ffmpeg-ladder
 
-Private helper scripts for the Travail de Bachelor video ladder.
-
 Keep these next to `ffmpeg.exe` and `ffprobe.exe`, then double-click `convert_4k_ladder.bat`:
 
 - `convert_4k_ladder.bat`
@@ -19,3 +17,7 @@ Keep these next to `ffmpeg.exe` and `ffprobe.exe`, then double-click `convert_4k
 5. Upscale to 4K: bicubic scale to 3840x2160, libx265 CRF 12, audio copy. Lists any video from `output\\` then `input\\` (name does not matter). Writes `Nom-bicubic-4k-24fps.mp4`
 6. CRF 18 control: pick a master in `input\\`, encode **1080p + 360p at CRF 18** (Lanczos downscale), force **24 fps**, then Lanczos-upscale each to 4K at CRF 12. Writes `Nom-360p-24fps-crf18.mp4` and `Nom-360p-24fps-crf18-lanczos-4k.mp4` (same for 1080p). No native-fps or 30 fps variants.
 7. Quit
+
+## License
+
+This project is licensed under the [GNU General Public License v3.0](LICENSE).
